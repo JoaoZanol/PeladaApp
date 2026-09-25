@@ -1,0 +1,139 @@
+{
+  "collections": {
+    "admins": {
+      "documentId": "uid",
+      "fields": {
+        "uid": "string",
+        "role": "admin",
+        "name": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "players": {
+      "documentId": "uid",
+      "fields": {
+        "name": "string",
+        "photo": "string",
+        "pos": "string",
+        "foot": "string",
+        "level": "string",
+        "bio": "string",
+        "sp": {
+          "type": "map",
+          "description": "Dados do jogador por espaço; chave = spaceId",
+          "example": {
+            "ssegunda": {
+              "joined": "timestamp",
+              "status": "in",
+              "for": "matchKey",
+              "at": "timestamp",
+              "cv": "yes",
+              "cf": "bbqKey"
+            }
+          }
+        }
+      }
+    },
+    "finance": {
+      "documentId": "uid",
+      "fields": {
+        "sp": {
+          "type": "map",
+          "description": "Financeiro por espaço; chave = spaceId",
+          "example": {
+            "ssegunda": {
+              "type": "mensalista",
+              "paid": "2026-09",
+              "bp": "bbqKey"
+            }
+          }
+        }
+      }
+    },
+    "config": {
+      "documentId": "spaces | {spaceId}",
+      "spacesDocument": {
+        "list": [
+          {
+            "id": "ssegunda",
+            "name": "Segundas"
+          }
+        ]
+      },
+      "spaceDocument": {
+        "field": "society",
+        "match": {
+          "date": "2026-10-02",
+          "time": "20:00",
+          "place": "Arena",
+          "limit": 14,
+          "key": 0
+        },
+        "teams": [
+          {
+            "id": "tv",
+            "name": "Time Verde",
+            "slots": 7,
+            "color": "#3f6b52"
+          }
+        ],
+        "assign": {
+          "playerUid": "teamId"
+        },
+        "brand": {
+          "name": "Nossa Pelada",
+          "logo": "data:image/...",
+          "map": "https://..."
+        },
+        "roles": {
+          "playerUid": "mensalista"
+        },
+        "fcfg": {
+          "mensal": 43,
+          "diaria": 15
+        },
+        "bbq": {
+          "date": "2026-10-10",
+          "time": "12:00",
+          "place": "Chácara",
+          "note": "Cada um leva uma bebida",
+          "key": 0
+        }
+      }
+    },
+    "events": {
+      "documentId": "auto",
+      "fields": {
+        "text": "string",
+        "icon": "string",
+        "at": "timestamp/number",
+        "by": "uid",
+        "sp": "spaceId"
+      }
+    }
+  },
+  "indexes": [
+    {
+      "collection": "events",
+      "fields": [
+        [
+          "at",
+          "DESCENDING"
+        ]
+      ]
+    },
+    {
+      "collection": "events",
+      "fields": [
+        [
+          "sp",
+          "ASCENDING"
+        ],
+        [
+          "at",
+          "DESCENDING"
+        ]
+      ]
+    }
+  ]
+}

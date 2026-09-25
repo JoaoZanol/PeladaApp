@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+  import {
+    getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, addDoc,
+    query, orderBy, limit, where, getDocs
+  } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+  import { getStorage } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js";
+
+  // Replace the values below with the Web App config from Firebase Console.
+  const firebaseConfig = {
+    apiKey: "COLOQUE_SUA_API_KEY",
+    authDomain: "SEU_PROJETO.firebaseapp.com",
+    projectId: "SEU_PROJETO",
+    storageBucket: "SEU_PROJETO.firebasestorage.app",
+    messagingSenderId: "SEU_SENDER_ID",
+    appId: "SEU_APP_ID"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const firestore = getFirestore(app);
+  getStorage(app);
+
+  // Small compatibility adapter for the existing HTML application.
+  window.PELADA_FIREBASE = { app, auth, firestore };
+
+  const wrapDoc = (path) => {
+    const d = doc(firestore, ...path.split("/"));
+    return {
+      async set(data) { return setDoc(d, data, { merge: false }); },
+      async delete() { return deleteDoc(d); },
+      onSnapshot(cb, fail) {
+        return onSnapshot(d, s => cb({
+          exists: s.exists(),
+          data: () => s.data() || {},
+          id: s.id
+        }), fail);
+      }
+    };
+  };
+
+  const wrapCollection = (name) => {
+    const c = collection(firestore, name);
+    return {
+      onSnapshot(cb, fail) {
+        return onSnapshot(c, s => cb({
+          docs: s.docs.map(d => ({ id: d.id, data: () => d.data() })),
+          docChanges: () => s.docChanges().map(ch => ({
+            type: ch.type,
+            doc: { id: ch.doc.id, data: () => ch.doc.data() }
+          }))
+        }), fail);
+      },
+      add(data) { return addDoc(c, data); },
+      orderBy(field, direction) {
+        return {
+          limit(n) {
+            return {
+              onSnapshot(cb, fail) {
+                return onSnapshot(
+                  query(c, orderBy(field, direction || "asc"), limit(n)),
+                  s => cb({
+                    docs: s.docs.map(d => ({ id: d.id, data: () => d.data() })),
+                    docChanges: () => s.docChanges().map(ch => ({
+                      type: ch.type,
+                      doc: { id: ch.doc.id, data: () => ch.doc.data() }
+                    }))
+                  }), fail
+                );
+              }
+            };
+          }
+        };
+      },
+      where(field, op, value) {
+        return {
+          get() {
+            return getDocs(query(c, where(field, op, value)));
+          }
+        };
+      }
+    };
+  };
+
+  window.PELADA_DB = {
+    doc: wrapDoc,
+    collection: wrapCollection
+  };
+
+  function userAdapter(firebaseUser) {
+    return {
+      async id() { return firebaseUser?.uid || null; },
+      async canEdit() {
+        // Admin status is controlled by Firestore rules/custom claims.
+        // For the UI, set an "admins/{uid}" document.
+        if (!firebaseUser) return false;
+        try {
+          const snap = await getDocs(query(
+            collection(firestore, "admins"),
+            where("uid", "==", firebaseUser.uid),
+            limit(1)
+          ));
+          return !snap.empty;
+        } catch (_) { return false; }
+      }
+    };
+  }
+
+  onAuthStateChanged(auth, async (firebaseUser) => {
+    if (!firebaseUser) {
+      try {
+        await signInAnonymously(auth);
+      } catch (e) {
+        console.error("Firebase Auth:", e);
+      }
+      return;
+    }
+    window.PELADA_USER = userAdapter(firebaseUser);
+    window.PELADA_FIREBASE_READY = true;
+    if (typeof window.initPelada === "function") window.initPelada();
+  });
+</script>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pelada — Confirmação de jogadores</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f2f3f5;--card:#fff;--tx:#1c232b;--mut:#6a7480;--pri:#2c3843;--pt:#fff;--yes:#4f7a68;--out:#a34f45;--unk:#8a929b;--bd:#dfe2e6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161a;--card:#1b2127;--tx:#e6e9ec;--mut:#93a0ab;--pri:#cfd6dc;--pt:#12161a;--yes:#5f927d;--out:#c0776b;--unk:#5d6873;--bd:#2a323a}}
+:root[data-theme="dark"]{--bg:#12161a;--card:#1b2127;--tx:#e6e9ec;--mut:#93a0ab;--pri:#cfd6dc;--pt:#12161a;--yes:#5f927d;--out:#c0776b;--unk:#5d6873;--bd:#2a323a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px 14px 90px}
+h1{font-size:22px;margin:4px 0 14px}h2{font-size:15px;margin:18px 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:12px}
+.match{background:linear-gradient(135deg,#34424f,#1f2932);color:#fff;border:0}
+.match small{opacity:.85;text-transform:uppercase;letter-spacing:.06em}
+.match .big{font-size:26px;font-weight:700;text-transform:capitalize;margin:4px 0}
+.match .row{display:flex;gap:14px;flex-wrap:wrap;font-size:15px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;border:0;border-radius:12px;padding:14px;font-weight:600;cursor:pointer;background:var(--bd);color:var(--tx)}
+button:disabled{opacity:.45}
+.in{background:var(--yes);color:#fff}.ou{background:var(--out);color:#fff}
+.sel.in,.sel.ou{outline:3px solid var(--tx)}
+.sm{padding:8px 12px;font-size:14px}
+.pl{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--bd)}
+.pl:first-child{border-top:0}
+.av{width:48px;height:48px;border-radius:50%;object-fit:cover;flex:none}
+.ph{display:flex;align-items:center;justify-content:center;background:var(--pri);color:var(--pt);font-weight:700;font-size:20px}
+.pi{display:flex;flex-direction:column;min-width:0;flex:1}
+.pi span{color:var(--mut);font-size:13px}.pi em{font-size:13px;color:var(--mut)}
+label{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}
+input,select,textarea{width:100%;font:inherit;padding:11px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;gap:6px;padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));background:var(--card);border-top:1px solid var(--bd)}
+.tabs button{flex:1;padding:10px}.tabs .on{background:var(--pri);color:var(--pt)}
+.mut{color:var(--mut);font-size:14px}.wait{color:#9a7b3c}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:20px;font-size:14px;display:none}
+.prev{width:96px;height:96px;margin-top:8px}
+.pop{position:fixed;left:0;right:0;top:calc(10px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;gap:8px;padding:0 12px;z-index:9;pointer-events:none}
+.pop div{pointer-events:auto;background:var(--card);border:1px solid var(--pri);border-left:6px solid var(--pri);border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px #0004;animation:pin .3s;max-width:560px;width:100%;margin:0 auto}
+@keyframes pin{from{transform:translateY(-20px);opacity:0}}
+.tabs button{font-size:13px;padding:10px 2px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bd);white-space:nowrap}
+.row2{display:flex;gap:8px;align-items:center}
+.art{overflow:hidden;border-radius:20px;padding:22px 16px;margin-bottom:12px;text-align:center;color:#fff;background:repeating-linear-gradient(90deg,#34424f 0 40px,#303d49 40px 80px);box-shadow:inset 0 0 0 4px #ffffff55}
+.art .lg{width:96px;height:96px;margin:0 auto 8px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;border:4px solid #fff}
+.art .lg img{width:100%;height:100%;object-fit:cover}
+.an{font-size:26px;font-weight:800;letter-spacing:.02em;text-transform:uppercase}
+.ad{margin-top:4px;text-transform:capitalize;font-size:15px}.ap{margin-top:6px;font-size:16px;font-weight:600}
+.mp{display:inline-block;margin-top:12px;background:#fff;color:#2c3843;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;font-size:14px}
+.tabs{align-items:flex-end}
+.tabs .mid{flex:0 0 100px;margin-top:-28px;padding:12px 6px;border-radius:26px;background:var(--pri);color:var(--pt);font-size:14px;font-weight:800;box-shadow:0 4px 14px #0006;border:3px solid var(--card)}
+.tabs .mid.on{outline:3px solid var(--tx)}
+.tabs .pulse{animation:pls 1.6s infinite}
+@keyframes pls{50%{transform:scale(1.07)}}
+.tabs .mid{transition:background .25s}
+.tabs .mid.yes{background:var(--yes);color:#fff}
+.tabs .mid.no{background:var(--out);color:#fff}
+.tabs .mid.unk{background:var(--unk);color:#fff}
+#hd{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;gap:8px;align-items:center;max-width:560px;margin:0 auto;padding:10px 14px 4px;background:var(--bg)}
+#hd select{flex:1;font-weight:700}
+</style>
+</head>
+<body>
+<header id="hd"></header>
+<main id="app"><p class="mut">Carregando…</p></main>
+<div id="toast"></div>
+<div id="pop" class="pop"></div>
+<nav class="tabs" id="tabs" hidden></nav>
+<script>
+const POS_MAP={society:['Goleiro','Zagueiro','Lateral','Meio-campo','Ala','Atacante','Qualquer posição'],
+futsal:['Goleiro','Fixo','Ala direita','Ala esquerda','Pivô','Qualquer posição'],
+campo:['Goleiro','Zagueiro','Lateral direito','Lateral esquerdo','Volante','Meio-campo','Ponta direita','Ponta esquerda','Atacante','Qualquer posição']};
+const posList=()=>POS_MAP[(space&&space.field)||'society']||POS_MAP.society;
+const FOOT=['Destro','Canhoto','Ambidestro'],LVL=['Resenha','Mediano','Fominha'];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let db=null,user=null,uid=null,isAdmin=false,match=null,players=[],view='home',ready=0,photo='',armed=null,fin={},fcfg={mensal:43,diaria:0},teams=[],assign={},brand={},roles={},spaces=[],sid=null,space={},allP=[],rawFin={},prof=null,unsub=null,bbq=null,editArt=false,reminderOff=false,ensuringTeams=false;
+
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',2600)}
+const fail=e=>toast(e&&e.code==='invalid_argument'?'Sem permissão para essa ação.':'Algo deu errado. Tente de novo.');
+const eff=p=>match&&p.for===match.key?p.status:null;
+const opts=(a,v)=>a.map(x=>`<option${x===v?' selected':''}>${x}</option>`).join('');
+const av=p=>p.photo&&/^data:image\//.test(p.photo)?`<img class="av" src="${esc(p.photo)}" alt="">`:`<div class="av ph">${esc((p.name||'?')[0].toUpperCase())}</div>`;
+const card=(p,x='')=>`<div class="pl">${av(p)}<div class="pi"><b>${esc(p.name)} ${roleTag(p)}</b><span>${esc([p.pos,p.foot,p.level].filter(Boolean).join(' · '))}</span>${p.bio?`<em>${esc(p.bio)}</em>`:''}</div>${x}</div>`;
+
+async function init(){
+  try{
+    db=window.PELADA_DB;
+    user=window.PELADA_USER;
+  }catch(e){}
+  if(!db){ready=1;render();return}
+  if(user){try{uid=await user.id();isAdmin=await user.canEdit()}catch(e){}}
+  db.doc('config/spaces').onSnapshot(s=>{spaces=s.exists?(s.data().list||[]):[];ready|=4;pick();rr()},fail);
+  db.collection('players').onSnapshot(s=>{allP=s.docs.map(d=>({id:d.id,...d.data()}));ready|=2;derive();if(!feed.on){feed.on=1;feed()}rr()},fail);
+  if(isAdmin)db.collection('finance').onSnapshot(s=>{rawFin={};s.docs.forEach(d=>rawFin[d.id]=d.data());derive();rr()},fail);
+  else if(uid)db.doc('finance/'+uid).onSnapshot(s=>{rawFin={[uid]:s.exists?s.data():{}};derive();rr()},fail);
+  render();
+}
+window.initPelada=init;
+function matchWin(){if(!match)return null;const d=new Date(match.date+'T'+(match.time||'00:00'));if(isNaN(d))return null;return{open:Date.now()>=d.getTime()-3*864e5,start:new Date(d.getTime()-3*864e5),d}}
+function rr(){const a=document.activeElement;if(view==='form'||(view==='admin'&&isAdmin)||(a&&/INPUT|TEXTAREA/.test(a.tagName)))return;render()}
+
+function render(){
+  const app=$('#app'),tabs=$('#tabs');
+  if(!db){tabs.hidden=true;app.innerHTML='<h1>Pelada</h1><div class="card">Não foi possível conectar. Abra o link estando logado no Claude e com acesso à página (peça ao organizador para te convidar como <b>Contribuidor</b>).</div>';return}
+  tabs.hidden=false;
+  $('#hd').innerHTML=`<select data-c="sp">${spaces.length?spaces.map(x=>`<option value="${esc(x.id)}"${x.id===sid?' selected':''}>${esc(x.name)}</option>`).join(''):'<option>Sem espaços</option>'}</select><button class="sm" data-a="go" data-v="form" title="Meu perfil">Perfil</button>${isAdmin?'<button class="sm" data-a="go" data-v="spaces">Espaços</button>':''}`;
+  const me=players.find(p=>p.id===uid),st=me&&eff(me),lab=st==='in'?'Estou dentro':st==='out'?'Estou fora':'Confirmar',ic=st==='in'?'✓':st==='out'?'✕':'?';
+  const T=isAdmin?[['admin','','Partida'],['teams','','Times'],['home',ic,lab],['bbq','','Churrasco'],['fin','','Caixa']]:[['admin','','Partida'],['home',ic,lab],['bbq','','Churrasco']];
+  tabs.innerHTML=T.map(([v,i,t])=>`<button class="${(view===v?'on ':'')+(v==='home'?'mid '+(st==='in'?'yes':st==='out'?'no':'unk')+(me&&match&&!st?' pulse':''):'')}" data-a="go" data-v="${v}">${v==='home'?`<b style="font-size:28px;line-height:1">${i}</b><br>`:''}${t}</button>`).join('');
+  if(isAdmin&&view==='teams'&&sid&&!teams.length&&!ensuringTeams){ensuringTeams=true;cfgSet({teams:[{id:'tv',name:'Time Verde',slots:7,color:'#3f6b52'},{id:'tp',name:'Time Preto',slots:7,color:'#2b2f33'}]}).finally(()=>ensuringTeams=false)}
+  app.innerHTML=(!sid&&view!=='form'&&view!=='spaces')?homeV():view==='form'?formV():view==='admin'?matchV():isAdmin&&view==='teams'?teamsV():isAdmin&&view==='fin'?finV():isAdmin&&view==='spaces'?spacesV():view==='bbq'?bbqV():homeV();
+}
+
+function homeV(){
+  if(ready<7)return '<p class="mut">Carregando…</p>';
+  if(!sid)return '<h1>Pelada</h1><div class="card">'+(isAdmin?'Crie o primeiro espaço (ex.: Segundas) em Espaços, no topo.':'Aguarde o organizador criar um espaço.')+'</div>';
+  const me=players.find(p=>p.id===uid),st=me?eff(me):null,lim=+(match&&match.limit)||0,win=matchWin();
+  const ins=players.filter(p=>eff(p)==='in').sort((a,b)=>(a.at||0)-(b.at||0));
+  const outs=players.filter(p=>eff(p)==='out'),pend=players.filter(p=>!eff(p));
+  let h='<h1>Pelada</h1>';
+  if(match){
+    const d=new Date(match.date+'T'+(match.time||'00:00')),ok=!isNaN(d);
+    h+=`<div class="card match"><small>Próxima partida</small><div class="big">${ok?esc(d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})):esc(match.date)}</div><div class="row"><span>${esc(match.time||'—')}</span>${match.place?`<span>${esc(match.place)}</span>`:''}<span>${ins.length}${lim?'/'+lim:''} confirmados</span></div></div>`;
+  }else h+='<div class="card"><b>Nenhuma partida marcada ainda.</b><div class="mut">'+(isAdmin?'Crie a próxima na aba Admin.':'Aguarde o organizador.')+'</div></div>';
+  if(me&&win&&win.open&&!st&&!reminderOff)h+=`<div class="card" style="border-left:6px solid var(--yes)"><div class="row2"><b style="flex:1">Lembrete de partida</b><button class="sm" data-a="dismiss">Fechar</button></div><div class="mut" style="margin:4px 0 10px">Partida em ${esc(win.d.toLocaleDateString('pt-BR',{day:'numeric',month:'long'}))}${match.time?' às '+esc(match.time):''}. Confirme sua presença para ajudar na organização.</div><div class="btns"><button class="in" data-a="st" data-s="in">Estou dentro</button><button class="ou" data-a="st" data-s="out">Estou fora</button></div></div>`;
+  if(!uid)h+='<div class="card mut">Entre com sua conta do Claude para se cadastrar e confirmar presença.</div>';
+  else if(prof&&!me)h+=`<div class="card"><b>Entrar em ${esc(spName())}</b><div class="mut" style="margin:4px 0 12px">Participe desta lista para confirmar presença.</div><button class="in" data-a="join" style="width:100%">Entrar neste espaço</button></div>`;
+  else if(!me)h+='<div class="card"><b>Primeiro, crie seu cadastro</b><div class="mut" style="margin:4px 0 12px">Foto, posição e suas características.</div><button class="in" data-a="go" data-v="form" style="width:100%">Criar meu cadastro</button></div>';
+  else{const on=match&&(!win||win.open);h+=`<div class="card"><b>Você vai jogar?</b>${win&&!win.open?`<div class="mut" style="margin-top:6px">Confirmação abre em ${esc(win.start.toLocaleDateString('pt-BR'))} (3 dias antes da partida).</div>`:''}<div class="btns" style="margin-top:10px"><button class="in ${st==='in'?'sel':''}" data-a="st" data-s="in" ${on?'':'disabled'}>Estou dentro</button><button class="ou ${st==='out'?'sel':''}" data-a="st" data-s="out" ${on?'':'disabled'}>Estou fora</button></div></div>`}
+  if(me)h+=payCard(me,fin[uid]||{});
+  if(me&&(fin[uid]||{}).type==='mensalista'&&new Date().getDate()<=5)h+=`<div class="card" style="border-left:6px solid var(--yes)"><b>Pagamento mensal</b><div class="mut" style="margin:4px 0 8px">Período de pagamento: dia 1 a 5. R$ ${fcfg.mensal} via Pix.</div><button class="sm" data-a="pix" data-t="m">Copiar PIX</button></div>`;
+  h+=`<h2>Confirmados (${ins.length})</h2><div class="card">${ins.length?ins.map((p,i)=>card(p,lim&&i>=lim?'<span class="wait">espera</span>':'')).join(''):'<span class="mut">Ninguém confirmou ainda.</span>'}</div>`;
+  if(teams.length)h+='<h2>Times</h2>'+teams.map(t=>{const m=members(t);return `<div class="card" style="border-left:6px solid ${esc(t.color)}"><b>${esc(t.name)}</b> <span class="tag">${m.length}/${t.slots} vagas</span>${m.map(p=>card(p)).join('')}</div>`}).join('');
+  if(outs.length)h+=`<h2>Fora (${outs.length})</h2><div class="card">${outs.map(p=>card(p)).join('')}</div>`;
+  if(pend.length)h+=`<h2>Sem resposta (${pend.length})</h2><div class="card">${pend.map(p=>card(p)).join('')}</div>`;
+  return h;
+}
+
+function formV(){
+  if(!uid)return '<h1>Meu perfil</h1><div class="card mut">Entre com sua conta do Claude para criar o cadastro.</div>';
+  const me=prof||{};photo=me.photo||'';
+  return `<h1>Meu perfil</h1><div class="card"><label>Foto</label><input type="file" accept="image/*" id="ph">${photo?av(me).replace('class="av"','class="av prev"'):'<img class="av prev" id="pv" hidden alt="">'}
+<label>Nome / apelido</label><input id="nm" maxlength="40" value="${esc(me.name)}">
+<label>Posição</label><select id="ps">${opts(posList(),me.pos)}</select>
+<label>Perna boa</label><select id="ft">${opts(FOOT,me.foot)}</select>
+<label>Estilo de jogo</label><select id="lv">${opts(LVL,me.level)}</select>
+<label>Características</label><textarea id="bio" rows="3" maxlength="200" placeholder="Ex.: rápido, bom de passe, não corre pra trás…">${esc(me.bio)}</textarea>
+<div class="card mut" style="margin:16px 0 0">Pagamento: mensalidade R$ ${fcfg.mensal} · goleiro não paga. A chave Pix aparece após o organizador definir se você é mensalista ou diarista.</div>
+<button class="in" data-a="save" style="width:100%;margin-top:16px">Salvar cadastro</button></div>`;
+}
+
+function adminV(){
+  const m=match||{};
+  return `<h1>Partida</h1><div class="card"><b>Próxima partida</b>
+<label>Data</label><input type="date" id="md" value="${esc(m.date)}"><label>Hora</label><input type="time" id="mt" value="${esc(m.time)}">
+<label>Local</label><input id="mp" maxlength="80" value="${esc(m.place)}"><label>Vagas (0 = sem limite)</label><input type="number" id="ml" min="0" value="${esc(m.limit??0)}">
+<div class="btns" style="margin-top:14px"><button class="in" data-a="match" data-n="0" ${match?'':'disabled'}>Salvar edição</button><button data-a="match" data-n="1">Nova partida</button></div>
+<div class="mut" style="margin-top:8px">“Nova partida” zera as confirmações; “Salvar edição” mantém.</div></div>
+<h2>Jogadores (${players.length})</h2><div class="card">${players.map(p=>card(p,`<button class="sm ou" data-a="del" data-id="${esc(p.id)}">${armed===p.id?'Confirmar?':'Remover'}</button>`)).join('')||'<span class="mut">Ninguém cadastrado.</span>'}</div>
+<div class="card mut">Para convidar jogadores, use “Compartilhar” nesta página e dê acesso de <b>Contribuidor</b>.</div>`;
+}
+
+const acts={
+  go(b){view=b.dataset.v;armed=null;editArt=false;render()},
+  dismiss(){reminderOff=true;render()},
+  invite(){const url='https://claude.ai/artifact/L4djv3Vj433LzV4F7oZgnb';try{navigator.clipboard.writeText(url).then(()=>toast('Link copiado!')).catch(()=>toast('Copie: '+url))}catch(e){toast('Copie: '+url)}},
+  pix(b){const code=b.dataset.t==='m'?MENSAL_PIX:DIARIA_PIX;try{navigator.clipboard.writeText(code).then(()=>toast('PIX copiado!')).catch(()=>toast('Não foi possível copiar'))}catch(e){toast('Não foi possível copiar')}},
+  async bbqpay(b){if(!isAdmin||!bbq)return;const id=b.dataset.id,f=fin[id]||{};try{await setFin(id,{bp:bbqPaid(f)?'':bbq.key})}catch(e){fail(e)}},
+  async brand(){const m=$('#bm').value.trim();
+    try{await cfgSet({brand:{name:$('#bn').value.trim(),map:/^https:\/\//.test(m)?m:MAP,logo:newLogo||brand.logo||''}});newLogo=null;toast('Arte salva');render()}catch(e){fail(e)}},
+  async join(){try{await setMe({joined:Date.now()});toast('Você entrou no espaço')}catch(e){fail(e)}},
+  async addsp(){const name=$('#sn').value.trim();if(!name)return toast('Dê um nome ao espaço');const field=($('#sf')||{}).value||'society';
+    const id='s'+Date.now().toString(36),list=[...spaces,{id,name}];
+    try{spaces=list;await db.doc('config/spaces').set({list});pick(id);await cfgSet({field});view='home';render()}catch(e){fail(e)}},
+  async delsp(b){const id=b.dataset.id;if(armed!==id){armed=id;return render()}armed=null;const list=spaces.filter(x=>x.id!==id);
+    try{spaces=list;await db.doc('config/spaces').set({list});db.doc('config/'+id).delete().catch(()=>{});pick();render()}catch(e){fail(e)}},
+  async vote(b){if(!bbq||!uid)return;
+    try{await setMe({cv:b.dataset.s,cf:bbq.key});toast(b.dataset.s==='yes'?'Você vai ao churrasco':'Ok, você não vai')}catch(e){fail(e)}},
+  async bbqsave(b){const date=$('#cd').value,t=$('#ct').value,pl=$('#cp').value.trim(),note=$('#cn').value.trim();if(!date)return toast('Informe a data');
+    const isNew=b.dataset.n==='1'||!bbq,key=isNew?Date.now():bbq.key;
+    try{await cfgSet({bbq:{date,time:t,place:pl,note,key}});
+      if(isNew){const d=new Date(date+'T'+(t||'00:00'));notify('Novo churrasco: '+(isNaN(d)?date:d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'}))+'!','')}
+      toast('Churrasco salvo')}catch(e){fail(e)}},
+  artopen(){editArt=true;render()},
+  artclose(){editArt=false;render()},
+  async addteam(){const name=$('#tn').value.trim();if(!name)return toast('Dê um nome ao time');
+    const list=[...teams,{id:'t'+Date.now().toString(36),name,slots:Math.max(1,+$('#ts').value||1),color:/^#[0-9a-f]{6}$/i.test($('#tc').value)?$('#tc').value:'#5b6b7a'}];
+    try{await cfgSet({teams:list})}catch(e){fail(e)}},
+  async delteam(b){try{await cfgSet({teams:teams.filter(t=>t.id!==b.dataset.id)})}catch(e){fail(e)}},
+  async paid(b){const id=b.dataset.id,f=fin[id]||{},k=f.type==='mensalista'?MONTH:String(match&&match.key||'');
+    if(!k)return toast('Crie a partida primeiro');
+    try{await setFin(id,{paid:paidNow(f)?'':k})}catch(e){fail(e)}},
+  async st(b){if(!match||!uid)return;const win=matchWin();if(win&&!win.open)return toast('Confirmação ainda não está aberta.');const me=players.find(p=>p.id===uid)||{},was=eff(me),s=b.dataset.s;if(was===s)return;
+    try{await setMe({status:s,for:match.key,at:Date.now()});toast(s==='in'?'Presença confirmada':'Ok, você está fora');
+      notify((me.name||'Alguém')+' '+(s==='in'?'confirmou presença':was==='in'?'desmarcou a presença':'não vai jogar'),s==='in'?'':'')}catch(e){fail(e)}},
+  async save(){
+    const name=$('#nm').value.trim();if(!name)return toast('Informe seu nome');
+    const me=prof||{};
+    try{await db.doc('players/'+uid).set({...me,id:undefined,name,photo,pos:$('#ps').value,foot:$('#ft').value,level:$('#lv').value,bio:$('#bio').value.trim(),sp:{...(me.sp||{}),...(sid&&!(me.sp||{})[sid]?{[sid]:{joined:Date.now()}}:{})}});
+      toast('Cadastro salvo');view='home';render()}catch(e){fail(e)}
+  },
+  async match(b){
+    const date=$('#md').value;if(!date)return toast('Informe a data');
+    const isNew=b.dataset.n==='1'||!match,key=isNew?Date.now():match.key;
+    try{await cfgSet({match:{date,time:$('#mt').value,place:$('#mp').value.trim(),limit:Math.max(0,+$('#ml').value||0),key}});if(isNew)await newMatch(date,$('#mt').value);toast('Partida salva');view='home';render()}catch(e){fail(e)}
+  },
+  async del(b){
+    if(armed!==b.dataset.id){armed=b.dataset.id;return render()}
+    armed=null;try{const r=allP.find(q=>q.id===b.dataset.id)||{},sp={...r.sp};delete sp[sid];await db.doc('players/'+b.dataset.id).set({...r,id:undefined,sp})}catch(e){fail(e)}
+    if(view==='admin')render();
+  }
+};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&acts[b.dataset.a])acts[b.dataset.a](b)});
+document.addEventListener('change',e=>{
+  if(e.target.id!=='ph'||!e.target.files[0])return;
+  const r=new FileReader();
+  r.onload=()=>{const i=new Image();i.onload=()=>{const s=240,m=Math.min(i.width,i.height),c=document.createElement('canvas');c.width=c.height=s;
+    c.getContext('2d').drawImage(i,(i.width-m)/2,(i.height-m)/2,m,m,0,0,s,s);photo=c.toDataURL('image/jpeg',.75);
+    const pv=document.querySelector('.prev');pv.hidden=false;pv.outerHTML=`<img class="av prev" src="${photo}" alt="">`};i.onerror=()=>toast('Imagem inválida');i.src=r.result};
+  r.readAsDataURL(e.target.files[0]);
+});
+const MONTH=new Date().toLocaleDateString('en-CA').slice(0,7);
+const DIARIA_PIX='00020126430014br.gov.bcb.pix0121joaozanol18@gmail.com520400005303986540515.005802BR5910Joao Zanol6009Sao Paulo62230519daqr1245115633225416304E3F6';
+const MENSAL_PIX='00020126430014br.gov.bcb.pix0121joaozanol18@gmail.com520400005303986540543.005802BR5910Joao Zanol6009Sao Paulo62230519daqr12451156359252963047550';
+const members=t=>players.filter(p=>assign[p.id]===t.id&&eff(p)==='in');
+const paidNow=f=>{const k=f.type==='mensalista'?MONTH:String(match&&match.key||'');return !!f.paid&&f.paid===k};
+function payCard(p,f){
+  if(p.pos==='Goleiro')return '<div class="card mut">Goleiro não paga.</div>';
+  if(!f.type)return '<div class="card mut">O organizador vai definir se você é mensalista ou diarista.</div>';
+  const ok=paidNow(f),isM=f.type==='mensalista',v=isM?fcfg.mensal:(+fcfg.diaria||15);
+  return `<div class="card"><div class="row2"><b style="flex:1;text-transform:capitalize">${f.type}</b><span class="tag">${ok?'pago':'pendente'}</span></div>${ok?'':`<div class="mut" style="margin:4px 0 8px">R$ ${v} via Pix</div><button class="sm" data-a="pix" data-t="${isM?'m':'d'}">Copiar PIX</button>`}</div>`;
+}
+const bbqPaid=f=>!!bbq&&f.bp===bbq.key;
+function teamsV(){
+  const ins=players.filter(p=>eff(p)==='in');
+  return `<h1>Times e vagas</h1><button class="sm" data-a="invite" style="margin-bottom:12px">+ Convidar jogador</button><div class="card"><b>Novo time</b><label>Nome</label><input id="tn" maxlength="30"><div class="row2"><div style="flex:1"><label>Vagas</label><input type="number" id="ts" min="1" value="7"></div><div><label>Cor</label><input type="color" id="tc" value="#5b6b7a" style="width:64px;padding:2px"></div></div><button class="in" data-a="addteam" style="width:100%;margin-top:12px">Adicionar time</button></div>
+${teams.map(t=>`<div class="card" style="border-left:6px solid ${esc(t.color)}"><div class="row2"><b style="flex:1">${esc(t.name)}</b><span class="tag">${members(t).length}/${t.slots}</span><button class="sm ou" data-a="delteam" data-id="${esc(t.id)}">Excluir</button></div></div>`).join('')}
+<h2>Escalar confirmados (${ins.length})</h2><div class="card">${ins.map(p=>card(p,`<select data-c="assign" data-id="${esc(p.id)}" style="width:auto${assign[p.id]?`;background:${esc((teams.find(t=>t.id===assign[p.id])||{}).color||'#5b6b7a')};color:#fff`:``}"><option value="">Sem time</option>${teams.map(t=>`<option value="${esc(t.id)}"${assign[p.id]===t.id?' selected':''}>${esc(t.name)}</option>`).join('')}</select>`)).join('')||'<span class="mut">Ninguém confirmou ainda.</span>'}</div>`;
+}
+function finV(){
+  const pay=players.filter(p=>p.pos!=='Goleiro'),F=p=>fin[p.id]||{};
+  const got=pay.filter(p=>paidNow(F(p))).reduce((n,p)=>n+(F(p).type==='mensalista'?+fcfg.mensal||0:+fcfg.diaria||0),0);
+  const pend=pay.filter(p=>F(p).type&&!paidNow(F(p))).length;
+  return `<h1>Financeiro — ${['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][new Date().getMonth()]}/${new Date().getFullYear()}</h1><div class="card"><div class="row2"><div style="flex:1"><label>Mensal (R$)</label><input type="number" data-c="pm" value="${fcfg.mensal}"></div><div style="flex:1"><label>Diária (R$)</label><input type="number" data-c="pd" value="${fcfg.diaria||''}"></div></div><div style="margin-top:12px"><b>Recebido: R$ ${got}</b> <span class="mut">· ${pend} pendentes</span></div><div class="mut">Mensal vale para ${MONTH}; diária, para a partida atual.</div></div>
+<div class="card">${players.map(p=>{const f=F(p);return p.pos==='Goleiro'?card(p,'<span class="tag">isento</span>'):card(p,`<div style="display:flex;flex-direction:column;gap:6px;width:130px"><select data-c="type" data-id="${esc(p.id)}"><option value="">Definir…</option><option value="mensalista"${f.type==='mensalista'?' selected':''}>Mensalista</option><option value="diarista"${f.type==='diarista'?' selected':''}>Diarista</option></select>${f.type?`<button class="sm ${paidNow(f)?'in':''}" data-a="paid" data-id="${esc(p.id)}">${paidNow(f)?'Pago':'Marcar pago'}</button>`:''}</div>`)}).join('')||'<span class="mut">Ninguém cadastrado.</span>'}</div>`;
+}
+const chg={
+  sp(el){pick(el.value);reminderOff=false;render()},
+  async assign(el){const t=teams.find(x=>x.id===el.value);
+    if(t&&assign[el.dataset.id]!==t.id&&members(t).length>=t.slots){toast('Time cheio');return render()}
+    const map={...assign};if(el.value)map[el.dataset.id]=el.value;else delete map[el.dataset.id];
+    try{await cfgSet({assign:map})}catch(e){fail(e)}},
+  type(el){const id=el.dataset.id;setFin(id,{type:el.value}).catch(fail);cfgSet({roles:{...roles,[id]:el.value}}).catch(fail)},
+  pm(el){cfgSet({fcfg:{...fcfg,mensal:+el.value||0}}).catch(fail)},
+  pd(el){cfgSet({fcfg:{...fcfg,diaria:+el.value||0}}).catch(fail)}
+};
+document.addEventListener('change',e=>{const c=e.target.dataset&&e.target.dataset.c;if(c&&chg[c])chg[c](e.target)});
+function notify(text,icon){const n=spName();db.collection('events').add({text:(n?'['+n+'] ':'')+text,icon,at:Date.now(),by:uid||'',sp:sid}).catch(()=>{})}
+async function newMatch(date,t){await cfgSet({assign:{}});const d=new Date(date+'T'+(t||'00:00'));notify('Nova partida: '+(isNaN(d)?date:d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'}))+(t?' às '+t:'')+'!','')}
+function popup(e){const d=document.createElement('div');d.textContent=(e.icon||'')+' '+e.text;d.onclick=()=>d.remove();$('#pop').appendChild(d);setTimeout(()=>d.remove(),7000)}
+function feed(){
+  const K='pelada_seen';let seen=0;
+  try{seen=+localStorage.getItem(K)||0}catch(e){}
+  if(!seen)seen=Date.now();
+  db.collection('events').orderBy('at','desc').limit(30).onSnapshot(s=>{
+    const n=s.docChanges().filter(c=>c.type==='added').map(c=>c.doc.data()).filter(e=>e.at>seen&&e.by!==uid&&(isAdmin||(prof&&prof.sp&&prof.sp[e.sp]))).sort((a,b)=>a.at-b.at);
+    s.docs.forEach(d=>{seen=Math.max(seen,+d.data().at||0)});
+    try{localStorage.setItem(K,seen)}catch(e){}
+    n.slice(-4).forEach(popup);
+  },fail);
+  if(isAdmin)db.collection('events').where('at','<',Date.now()-3*864e5).get().then(s=>s.docs.forEach(d=>db.doc('events/'+d.id).delete())).catch(()=>{});
+}
+const MAP='https://share.google/RKX66v8GIWrc6YlC3';let newLogo=null;
+const BALL='<svg viewBox="0 0 64 64" width="72" height="72"><circle cx="32" cy="32" r="29" fill="#fff" stroke="#14261a" stroke-width="3"/><path d="M32 18l11 8-4 13H25l-4-13z" fill="#14261a"/><path d="M32 18V4M43 26l13-5M39 39l9 11M25 39l-9 11M21 26L8 21" stroke="#14261a" stroke-width="3" fill="none"/></svg>';
+function roleTag(p){const r=roles[p.id]||(fin[p.id]||{}).type;return r?`<span class="tag" style="font-weight:400">${r==='mensalista'?'Mensalista':'Diarista'}</span>`:''}
+function artV(){
+  const logo=brand.logo&&/^data:image\//.test(brand.logo)?`<img src="${esc(brand.logo)}" alt="">`:BALL,map=/^https:\/\//.test(brand.map||'')?brand.map:MAP;
+  const d=match&&new Date(match.date+'T'+(match.time||'00:00')),ok=d&&!isNaN(d);
+  return `<div class="art"><div class="lg">${logo}</div><div class="an">${esc(brand.name||'Nossa Pelada')}</div>${match?`<div class="ad">${ok?esc(d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})):esc(match.date)}${match.time?' · '+esc(match.time):''}</div>`:''}<div class="ap">${esc((match&&match.place)||'Local a definir')}</div><a class="mp" href="${esc(map)}" target="_blank" rel="noopener">Ver localização no mapa</a></div>`;
+}
+function matchV(){
+  if(ready<7)return '<p class="mut">Carregando…</p>';
+  if(!isAdmin)return '<h1>Partida</h1>'+artV()+`<div class="card mut">${match?`Vagas: ${+match.limit||'sem limite'} · Confirmados: ${players.filter(p=>eff(p)==='in').length}`:'Nenhuma partida marcada ainda.'}<br>Somente o organizador edita esta aba.</div>`;
+  const artEdit=editArt?`<div class="card"><div class="row2"><b style="flex:1">Arte e localização</b><button class="sm" data-a="artclose">Fechar</button></div><label>Nome da pelada</label><input id="bn" maxlength="40" value="${esc(brand.name)}"><label>Símbolo (imagem)</label><input type="file" accept="image/*" id="bl"><label>Link do mapa</label><input id="bm" value="${esc(brand.map||MAP)}"><button class="in" data-a="brand" style="width:100%;margin-top:14px">Salvar arte</button><div class="mut" style="margin-top:8px">O local exibido na arte é o campo “Local” da partida.</div></div>`
+    :`<button class="sm" data-a="artopen" style="margin-bottom:12px">✎ Editar arte e localização</button>`;
+  return '<h1>Partida</h1>'+artV()+artEdit+adminV().replace('<h1>Partida</h1>','');
+}
+document.addEventListener('change',e=>{
+  if(e.target.id!=='bl'||!e.target.files[0])return;
+  const r=new FileReader();
+  r.onload=()=>{const i=new Image();i.onload=()=>{const m=Math.min(i.width,i.height),c=document.createElement('canvas');c.width=c.height=200;
+    c.getContext('2d').drawImage(i,(i.width-m)/2,(i.height-m)/2,m,m,0,0,200,200);newLogo=c.toDataURL('image/jpeg',.8);toast('Símbolo carregado. Toque em Salvar arte.')};i.onerror=()=>toast('Imagem inválida');i.src=r.result};
+  r.readAsDataURL(e.target.files[0]);
+});
+const spName=()=>(spaces.find(x=>x.id===sid)||{}).name||'';
+function applySpace(){match=space.match||null;bbq=space.bbq||null;teams=space.teams||[];assign=space.assign||{};brand=space.brand||{};roles=space.roles||{};fcfg={mensal:43,diaria:0,...(space.fcfg||{})}}
+function derive(){
+  players=allP.filter(d=>sid&&d.sp&&d.sp[sid]).map(d=>({...d,...d.sp[sid],id:d.id}));
+  prof=allP.find(d=>d.id===uid)||null;
+  fin={};Object.keys(rawFin).forEach(k=>fin[k]=((rawFin[k]||{}).sp||{})[sid]||{});
+}
+function pick(w){
+  let want=w||sid;if(!want){try{want=localStorage.getItem('pelada_sid')}catch(e){}}
+  if(!spaces.some(x=>x.id===want))want=spaces[0]?spaces[0].id:null;
+  if(want!==sid||(sid&&!unsub)){
+    if(unsub)unsub();unsub=null;sid=want;space={};applySpace();
+    try{localStorage.setItem('pelada_sid',sid||'')}catch(e){}
+    if(sid){ready&=~1;unsub=db.doc('config/'+sid).onSnapshot(s=>{space=s.exists?s.data():{};applySpace();ready|=1;derive();rr()},fail)}
+  }
+  if(!sid)ready|=1;
+  derive();
+}
+function cfgSet(patch){if(!sid)return Promise.reject({});space={...space,...patch};applySpace();return db.doc('config/'+sid).set(space)}
+const setMe=patch=>db.doc('players/'+uid).set({...prof,id:undefined,sp:{...(prof.sp||{}),[sid]:{...((prof.sp||{})[sid]),...patch}}});
+const setFin=(id,patch)=>{const r=rawFin[id]||{};return db.doc('finance/'+id).set({...r,sp:{...(r.sp||{}),[sid]:{...((r.sp||{})[sid]),...patch}}})};
+function spacesV(){return `<h1>Espaços</h1><div class="card"><b>Novo espaço</b><label>Nome (ex.: Segundas)</label><input id="sn" maxlength="30"><label>Tipo de campo</label><select id="sf"><option value="society">Society</option><option value="futsal">Futsal</option><option value="campo">Campo</option></select><button class="in" data-a="addsp" style="width:100%;margin-top:12px">Criar espaço</button></div><div class="card">${spaces.map(x=>`<div class="pl"><b style="flex:1">${esc(x.name)}</b>${x.id===sid?'<span class="tag">atual</span>':''}<button class="sm ou" data-a="delsp" data-id="${esc(x.id)}">${armed===x.id?'Confirmar?':'Excluir'}</button></div>`).join('')||'<span class="mut">Nenhum espaço ainda.</span>'}</div><div class="mut">Cada espaço tem sua própria partida, times, financeiro e lista de jogadores.</div>`}
+const bv=p=>bbq&&p.cf===bbq.key?p.cv:null;
+function bbqV(){
+  if(ready<7)return '<p class="mut">Carregando…</p>';
+  const me=players.find(p=>p.id===uid),v=me?bv(me):null;
+  const yes=players.filter(p=>bv(p)==='yes'),no=players.filter(p=>bv(p)==='no'),pend=players.filter(p=>!bv(p));
+  let h='<h1>Churrasco</h1>';
+  if(bbq){const d=new Date(bbq.date+'T'+(bbq.time||'00:00')),ok=!isNaN(d);
+    h+=`<div class="card match"><small>Churrasco</small><div class="big">${ok?esc(d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})):esc(bbq.date)}</div><div class="row">${bbq.time?`<span>${esc(bbq.time)}</span>`:''}${bbq.place?`<span>${esc(bbq.place)}</span>`:''}<span>${yes.length} vão</span></div>${bbq.note?`<div style="margin-top:8px">${esc(bbq.note)}</div>`:''}</div>`}
+  else h+=`<div class="card"><b>Nenhum churrasco marcado.</b><div class="mut">${isAdmin?'Crie um abaixo.':'Aguarde o organizador.'}</div></div>`;
+  if(!uid)h+='<div class="card mut">Entre com sua conta do Claude para votar.</div>';
+  else if(!prof)h+='<div class="card"><b>Primeiro, crie seu cadastro</b><button class="in" data-a="go" data-v="form" style="width:100%;margin-top:10px">Criar meu cadastro</button></div>';
+  else if(!me)h+='<div class="card"><b>Entre neste espaço para votar</b><button class="in" data-a="join" style="width:100%;margin-top:10px">Entrar neste espaço</button></div>';
+  else h+=`<div class="card"><b>Você vai ao churrasco?</b><div class="btns" style="margin-top:10px"><button class="in ${v==='yes'?'sel':''}" data-a="vote" data-s="yes" ${bbq?'':'disabled'}>Vou</button><button class="ou ${v==='no'?'sel':''}" data-a="vote" data-s="no" ${bbq?'':'disabled'}>Não vou</button></div></div>`;
+  h+=`<h2>Vão (${yes.length})</h2><div class="card">${yes.map(p=>{const paid=bbqPaid(fin[p.id]||{});return card(p,isAdmin?`<button class="sm ${paid?'in':''}" data-a="bbqpay" data-id="${esc(p.id)}">${paid?'Pago':'Marcar pago'}</button>`:'')}).join('')||'<span class="mut">Ninguém ainda.</span>'}</div>`;
+  if(no.length)h+=`<h2>Não vão (${no.length})</h2><div class="card">${no.map(p=>card(p)).join('')}</div>`;
+  if(pend.length)h+=`<h2>Sem resposta (${pend.length})</h2><div class="card">${pend.map(p=>card(p)).join('')}</div>`;
+  if(isAdmin){const b=bbq||{};h+=`<h2>Organizar</h2><div class="card"><label>Data</label><input type="date" id="cd" value="${esc(b.date)}"><label>Hora</label><input type="time" id="ct" value="${esc(b.time)}"><label>Local</label><input id="cp" maxlength="80" value="${esc(b.place)}"><label>Observação</label><input id="cn" maxlength="120" placeholder="Ex.: cada um leva uma bebida" value="${esc(b.note)}"><div class="btns" style="margin-top:14px"><button class="in" data-a="bbqsave" data-n="0" ${bbq?'':'disabled'}>Salvar edição</button><button data-a="bbqsave" data-n="1">Novo churrasco</button></div><div class="mut" style="margin-top:8px">“Novo churrasco” zera os votos.</div></div>`}
+  return h;
+}
+if(window.PELADA_FIREBASE_READY) init();
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function validString(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    function playerKeysOk() {
+      return request.resource.data.keys().hasOnly([
+        "name", "photo", "pos", "foot", "level", "bio", "sp"
+      ]);
+    }
+
+    function playerValid() {
+      return playerKeysOk()
+        && validString(request.resource.data.name, 40)
+        && validString(request.resource.data.photo, 1500000)
+        && validString(request.resource.data.pos, 40)
+        && validString(request.resource.data.foot, 30)
+        && validString(request.resource.data.level, 30)
+        && validString(request.resource.data.bio, 200)
+        && request.resource.data.sp is map;
+    }
+
+    // Administrative identities.
+    match /admins/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Global list of spaces and each space's configuration.
+    match /config/spaces {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /config/{spaceId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Player profile.
+    // A player may create/update only their own document.
+    // Admin can manage all player documents.
+    match /players/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && playerValid();
+      allow update: if isAdmin() ||
+        (signedIn()
+        && request.auth.uid == uid
+        && playerValid());
+      allow delete: if isAdmin();
+    }
+
+    // Financial information is private to the player and admins.
+    // Players cannot change payment status/type directly.
+    match /finance/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      allow create: if isAdmin();
+
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          // Prevent a normal player from modifying their finance document.
+          && false
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // Events can be read by authenticated users.
+    // The app creates events for user actions, but admins retain cleanup control.
+    match /events/{eventId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.sp is string
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 300;
+
+      allow update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

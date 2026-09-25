@@ -1,0 +1,27 @@
+{
+  "config/spaces": {
+    "list": [
+      {
+        "id": "ssegunda",
+        "name": "Segundas"
+      }
+    ]
+  },
+  "config/ssegunda": {
+    "field": "society",
+    "match": null,
+    "teams": [],
+    "assign": {},
+    "brand": {
+      "name": "Nossa Pelada",
+      "logo": "",
+      "map": ""
+    },
+    "roles": {},
+    "fcfg": {
+      "mensal": 43,
+      "diaria": 15
+    },
+    "bbq": null
+  }
+}
