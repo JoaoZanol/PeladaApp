@@ -1,0 +1,24 @@
+{
+  "firestore": {
+    "rules": "PeladaApp/firebase/firestore.rules",
+    "indexes": "PeladaApp/firebase/firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "PeladaApp/firebase/storage.rules"
+  },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "PeladaApp/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

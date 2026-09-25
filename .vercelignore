@@ -1,0 +1,7 @@
+# Vercel Ignore
+PeladaApp/
+.git/
+.firebaserc
+firebase.json
+temp_users.json
+*.log
